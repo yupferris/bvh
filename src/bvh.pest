@@ -1,0 +1,25 @@
+whitespace = { (" " | "\t" | "\r" | "\n")+ }
+
+alpha = { 'a'..'z' | 'A'..'Z' }
+digit = { '0'..'9' }
+
+integer = @{ digit+ }
+float = @{ "-"? ~ ((digit+ ~ "." ~ digit*) | ("." ~ digit+) | (digit+) ) }
+
+identifier = { alpha ~ (alpha | digit)* }
+
+bvh = { soi ~ hierarchy ~ motion ~ eoi }
+
+hierarchy = { "HIERARCHY" ~ root_joint }
+
+root_joint = { "ROOT" ~ joint_body }
+joint_body = { identifier ~ "{" ~ offset ~ channels ~ (joint+ | end_site) ~ "}" }
+offset = { "OFFSET" ~ float ~ float ~ float }
+channels = { "CHANNELS" ~ integer ~ channel+ }
+channel = @{ ("X" | "Y" | "Z") ~ ("position" | "rotation") }
+joint = { "JOINT" ~ joint_body }
+end_site = { "End Site" ~ "{" ~ offset ~ "}" }
+
+motion = { "MOTION" ~ frames }
+
+frames = { "Frames:" ~ integer ~ "Frame Time:" ~ float ~ float+ }

@@ -74,7 +74,7 @@ pub struct EndSite {
 pub struct Motion {
     pub num_frames: u32,
     pub frame_time: f64,
-    pub frame_data: Vec<f64>,
+    pub frames: Vec<Vec<f64>>,
 }
 
 pub fn parse(input: &str) -> Result<Bvh, String> {
@@ -89,10 +89,22 @@ pub fn parse(input: &str) -> Result<Bvh, String> {
 
     let mut motion_pairs = bvh_pairs.find(|pair| pair.as_rule() == Rule::motion).unwrap().into_inner();
     let mut frames_pairs = motion_pairs.find(|pair| pair.as_rule() == Rule::frames).unwrap().into_inner();
+    let num_frames = frames_pairs.find(|pair| pair.as_rule() == Rule::integer).unwrap().as_str().parse::<u32>().unwrap();
+    let frame_time = parse_f64(&mut frames_pairs);
+    let mut frames = Vec::new();
+    let mut frame = Vec::new();
+    let total_channels = root.total_channels();
+    for (index, value) in frames_pairs.filter(|pair| pair.as_rule() == Rule::float).map(|pair| pair.as_str().parse::<f64>().unwrap()).enumerate() {
+        frame.push(value);
+        if (index as u32) % total_channels == total_channels - 1 {
+            frames.push(frame);
+            frame = Vec::new();
+        }
+    }
     let motion = Motion {
-        num_frames: frames_pairs.find(|pair| pair.as_rule() == Rule::integer).unwrap().as_str().parse::<u32>().unwrap(),
-        frame_time: parse_f64(&mut frames_pairs),
-        frame_data: frames_pairs.filter(|pair| pair.as_rule() == Rule::float).map(|pair| pair.as_str().parse::<f64>().unwrap()).collect(),
+        num_frames: num_frames,
+        frame_time: frame_time,
+        frames: frames,
     };
 
     Ok(Bvh {
@@ -152,7 +164,7 @@ fn parse_f64(offset_pairs: &mut Pairs<Rule>) -> f64 {
 
 pub fn serialize<W: Write>(bvh: &Bvh, w: &mut W) -> io::Result<()> {
     serialize_hierarchy(&bvh.hierarchy, w)?;
-    serialize_motion(&bvh.motion, bvh.hierarchy.root.total_channels(), w)?;
+    serialize_motion(&bvh.motion, w)?;
 
     Ok(())
 }
@@ -210,18 +222,19 @@ fn serialize_offset<W: Write>(offset: &Offset, w: &mut W) -> io::Result<()> {
     writeln!(w, "OFFSET {} {} {}", offset.x, offset.y, offset.z)
 }
 
-fn serialize_motion<W: Write>(motion: &Motion, total_channels: u32, w: &mut W) -> io::Result<()> {
+fn serialize_motion<W: Write>(motion: &Motion, w: &mut W) -> io::Result<()> {
     writeln!(w, "MOTION")?;
     writeln!(w, "Frames: {}", motion.num_frames)?;
     writeln!(w, "Frame Time: {}", motion.frame_time)?;
 
-    for (index, value) in motion.frame_data.iter().enumerate() {
-        write!(w, "{}", value)?;
-        if (index as u32) % total_channels != total_channels - 1 {
-            write!(w, " ")?;
-        } else {
-            writeln!(w, "")?;
+    for frame in motion.frames.iter() {
+        for (index, value) in frame.iter().enumerate() {
+            write!(w, "{}", value)?;
+            if index % frame.len() != frame.len() - 1 {
+                write!(w, " ")?;
+            }
         }
+        writeln!(w, "")?;
     }
 
     Ok(())

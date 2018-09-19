@@ -5,6 +5,8 @@ extern crate pest_derive;
 use pest::Parser;
 use pest::iterators::Pairs;
 
+use std::io::{self, Write};
+
 #[cfg(debug_assertions)]
 const _GRAMMAR: &'static str = include_str!("bvh.pest");
 
@@ -29,6 +31,15 @@ pub struct Joint {
     pub offset: Offset,
     pub channels: Vec<Channel>,
     pub children: JointChildren,
+}
+
+impl Joint {
+    pub fn total_channels(&self) -> u32 {
+        (self.channels.len() as u32) + match self.children {
+            JointChildren::Joints(ref joints) => joints.iter().map(|joint| joint.total_channels()).sum(),
+            JointChildren::EndSite(_) => 0,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -139,3 +150,79 @@ fn parse_f64(offset_pairs: &mut Pairs<Rule>) -> f64 {
     offset_pairs.find(|pair| pair.as_rule() == Rule::float).unwrap().as_str().parse::<f64>().unwrap()
 }
 
+pub fn serialize<W: Write>(bvh: &Bvh, w: &mut W) -> io::Result<()> {
+    serialize_hierarchy(&bvh.hierarchy, w)?;
+    serialize_motion(&bvh.motion, bvh.hierarchy.root.total_channels(), w)?;
+
+    Ok(())
+}
+
+fn serialize_hierarchy<W: Write>(hierarchy: &Hierarchy, w: &mut W) -> io::Result<()> {
+    writeln!(w, "HIERARCHY")?;
+    write!(w, "ROOT ")?;
+    serialize_joint(&hierarchy.root, w)?;
+
+    Ok(())
+}
+
+fn serialize_joint<W: Write>(joint: &Joint, w: &mut W) -> io::Result<()> {
+    writeln!(w, "{}", joint.name)?;
+    writeln!(w, "{{")?;
+
+    serialize_offset(&joint.offset, w)?;
+
+    write!(w, "CHANNELS {}", joint.channels.len())?;
+    for channel in joint.channels.iter() {
+        match *channel {
+            Channel::XPosition => write!(w, " Xposition"),
+            Channel::YPosition => write!(w, " Yposition"),
+            Channel::ZPosition => write!(w, " Zposition"),
+            Channel::XRotation => write!(w, " Xrotation"),
+            Channel::YRotation => write!(w, " Yrotation"),
+            Channel::ZRotation => write!(w, " Zrotation"),
+        }?;
+    }
+    writeln!(w, "")?;
+
+    match joint.children {
+        JointChildren::Joints(ref joints) => {
+            for joint in joints.iter() {
+                write!(w, "JOINT ")?;
+                serialize_joint(joint, w)?;
+            }
+        }
+        JointChildren::EndSite(ref end_site) => {
+            writeln!(w, "End Site")?;
+            writeln!(w, "{{")?;
+
+            serialize_offset(&end_site.offset, w)?;
+
+            writeln!(w, "}}")?;
+        }
+    }
+
+    writeln!(w, "}}")?;
+
+    Ok(())
+}
+
+fn serialize_offset<W: Write>(offset: &Offset, w: &mut W) -> io::Result<()> {
+    writeln!(w, "OFFSET {} {} {}", offset.x, offset.y, offset.z)
+}
+
+fn serialize_motion<W: Write>(motion: &Motion, total_channels: u32, w: &mut W) -> io::Result<()> {
+    writeln!(w, "MOTION")?;
+    writeln!(w, "Frames: {}", motion.num_frames)?;
+    writeln!(w, "Frame Time: {}", motion.frame_time)?;
+
+    for (index, value) in motion.frame_data.iter().enumerate() {
+        write!(w, "{}", value)?;
+        if (index as u32) % total_channels != total_channels - 1 {
+            write!(w, " ")?;
+        } else {
+            writeln!(w, "")?;
+        }
+    }
+
+    Ok(())
+}
